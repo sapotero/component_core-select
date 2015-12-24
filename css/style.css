@@ -1,0 +1,12 @@
+.container > div{
+  height: 100%;
+}
+.leftSidebar{
+  background-color: #E0E0E0;
+}
+.main{
+  background-color: #F5F5F5;
+}
+.rightSidebar{
+  background-color: #E0E0E0;
+}
