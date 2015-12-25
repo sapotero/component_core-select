@@ -217,6 +217,22 @@
         border-color: #2196F3;
         border-width: 2px;
     }
+  </style>
+
+  <style type="text/css">
+    .autocomplete-suggestions {
+      text-align: left; cursor: default; border: 1px solid #ccc; border-top: 0; background: #fff; box-shadow: -1px 1px 3px rgba(0,0,0,.1);
+      position: absolute; display: none; z-index: 9999; max-height: 254px; overflow: hidden; overflow-y: auto; box-sizing: border-box;
+    }
+    .autocomplete-suggestion { 
+      position: relative; padding: 0 .6em; line-height: 23px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 1.02em; color: #333;
+    }
+    .autocomplete-suggestion b {
+      font-weight: normal; color: #1f8dd6;
+    }
+    .autocomplete-suggestion.selected {
+      background: #f0f0f0;
+    }
 
   </style>
 
@@ -262,12 +278,9 @@
         <div class="mui--clearfix"></div>
       </div>
       <div class="criteriaForm hide mui-select">
-          <select name="table_name">
-            <option value="554c5fc85804000014000001">Справочник</option>
-            <option >Выберете журнал</option>
-            <option >Выберете журнал</option>
-            <option >Выберете журнал</option>
-            <option >Выберете журнал</option>
+          <!-- <input class="mui-textfield" placeholder="Выберете справочник" name="table_name"> -->
+          <select placeholder="Выберете справочник" name="table_name">
+            <option disabled="true">Выберете справочник</option>
           </select>
 
           <select name="origin_name">
@@ -275,20 +288,22 @@
           </select>
           
           <select name="conditions">
+            <option disabled="true">Выберете условие</option>
             <option value="equal">Точное совпадение</option>
             <option value="not_equal">Не</option>
             <option value="regexp">Частичное совпадение</option>
             <option value="full_text">Ключевые слова</option>
           </select>
           
-          <input class="mui-textfield" type="text" name="value" placeholder="Значение">
+          <input class="mui-textfield" type="text" name="value" placeholder="Начните ввод">
+          <!-- <input class="mui-textfield" placeholder="Выберете справочник" name="table_name"> -->
           
       </div>
     </li>
 </template>
 
 <script>
-window.onload = (function(window, document, undefined) {
+window.onload = (function( window, document, undefined) {
   var thatDoc         = document,
       thisDoc         = (thatDoc._currentScript || thatDoc.currentScript).ownerDocument,
       groupTemplate   = thisDoc.querySelector('template#group').content,
@@ -297,7 +312,7 @@ window.onload = (function(window, document, undefined) {
   
   // CoreSelectProto.select = 'World';
   
-  CoreSelectProto.createdCallback = function() {
+  CoreSelectProto.createdCallback = function( ) {
     var shadowRoot = this.createShadowRoot(),
         group      = thatDoc.importNode( groupTemplate, true );
     
@@ -305,44 +320,377 @@ window.onload = (function(window, document, undefined) {
     var list = shadowRoot.querySelector('.criteriaSelectorGroupList');
     
 
-    shadowRoot.querySelector('.addCriteriaItemToGroup').addEventListener('click', function(){
-      var item            = itemTemplate.cloneNode(true),
-          header          = item.querySelector('.criteriaSelectorItemHeader'),
-          form            = item.querySelector('.criteriaForm'),
-          headerCondition = item.querySelector('select.itemSelectCondition');
+    shadowRoot.querySelector('.addCriteriaItemToGroup').addEventListener('click', function() {
 
-      list.appendChild( item );
+    var autoComplete = (function() {
+      // "use strict";
+      function autoComplete( options ) {
+        if (!document.querySelector) return;
+
+        // helpers
+        function hasClass( el, className ) { return el.classList ? el.classList.contains(className) : new RegExp('\\b'+ className+'\\b').test(el.className); }
+
+        function addEvent( el, type, handler ) {
+          if (el.attachEvent) el.attachEvent('on'+type, handler); else el.addEventListener(type, handler);
+        }
+        function removeEvent( el, type, handler ) {
+          if (el.detachEvent) el.detachEvent('on'+type, handler); else el.removeEventListener(type, handler);
+        }
+        function live( elClass, event, cb, context ) {
+          addEvent(context || document, event, function( e ) {
+            var found, el = e.target || e.srcElement;
+            while (el && !(found = hasClass(el, elClass))) el = el.parentElement;
+            if (found) cb.call(el, e);
+          });
+        }
+
+        var o = {
+          selector  : 0,
+          source    : 0,
+          minChars  : 3,
+          delay     : 150,
+          cache     : 1,
+          menuClass : '',
+          renderItem: function( item, search ) {
+            search = search.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+            var re = new RegExp("(" + search.split(' ').join('|') + ")", "gi");
+            return '<div class="autocomplete-suggestion" data-val="' + item + '">' + item.replace(re, "<b>$1</b>") + '</div>';
+          },
+          onSelect: function( e, term, item ) {}
+        };
+        for (var k in options) { if (options.hasOwnProperty(k)) o[k] = options[k]; }
+
+        // init
+        var elems = typeof o.selector == 'object' ? [o.selector] : document.querySelectorAll(o.selector);
+        for (var i=0; i<elems.length; i++) {
+          var that = elems[i];
+
+          // create suggestions container "sc"
+          that.sc = document.createElement('div');
+          that.sc.className = 'autocomplete-suggestions '+o.menuClass;
+
+          that.autocompleteAttr = that.getAttribute('autocomplete');
+          that.setAttribute('autocomplete', 'off');
+          that.cache = {};
+          that.last_val = '';
+
+          that.updateSC = function( resize, next ) {
+            var rect = that.getBoundingClientRect();
+            that.sc.style.left = rect.left + (window.pageXOffset || document.documentElement.scrollLeft) + 'px';
+            that.sc.style.top = rect.bottom + (window.pageYOffset || document.documentElement.scrollTop) + 1 + 'px';
+            that.sc.style.width = rect.right - rect.left + 'px'; // outerWidth
+            if (!resize) {
+              that.sc.style.display = 'block';
+              if (!that.sc.maxHeight) {
+                that.sc.maxHeight = parseInt((window.getComputedStyle ? getComputedStyle(that.sc, null) : that.sc.currentStyle).maxHeight);
+              }
+              if (!that.sc.suggestionHeight) {
+                that.sc.suggestionHeight = that.sc.querySelector('.autocomplete-suggestion').offsetHeight;
+              }
+              if (that.sc.suggestionHeight ) {
+                if ( !next  ) {
+                  that.sc.scrollTop = 0;
+                }
+                else {
+                  var scrTop = that.sc.scrollTop, selTop = next.getBoundingClientRect().top - that.sc.getBoundingClientRect().top;
+                  if (selTop + that.sc.suggestionHeight - that.sc.maxHeight > 0 ) {
+                    that.sc.scrollTop = selTop + that.sc.suggestionHeight + scrTop - that.sc.maxHeight;
+                  }
+                  else if (selTop < 0 ) {
+                    that.sc.scrollTop = selTop + scrTop;
+                  }
+                }
+              }
+            }
+          };
+          addEvent(window, 'resize', that.updateSC);
+          shadowRoot.appendChild(that.sc);
+
+          live('autocomplete-suggestion', 'mouseleave', function( e ) {
+            var sel = that.sc.querySelector('.autocomplete-suggestion.selected');
+            if (sel) setTimeout(function() { sel.className = sel.className.replace('selected', ''); }, 20);
+          }, that.sc);
+
+          live('autocomplete-suggestion', 'mouseover', function( e ) {
+            var sel = that.sc.querySelector('.autocomplete-suggestion.selected');
+            if (sel) sel.className = sel.className.replace('selected', '');
+            this.className += ' selected';
+          }, that.sc);
+
+          live('autocomplete-suggestion', 'mousedown', function( e ) {
+            if (hasClass(this, 'autocomplete-suggestion')) { // else outside click
+              var v = this.getAttribute('data-val');
+              that.value = v;
+              o.onSelect(e, v, this);
+              that.sc.style.display = 'none';
+            }
+          }, that.sc);
+
+          that.blurHandler = function() {
+            try { var over_sb = document.querySelector('.autocomplete-suggestions:hover'); } catch(e ) { var over_sb = 0; }
+            if (!over_sb) {
+              that.last_val = that.value;
+              that.sc.style.display = 'none';
+              setTimeout(function() { that.sc.style.display = 'none'; }, 350); // hide suggestions on fast input
+            } else if (that !== document.activeElement) setTimeout(function() { that.focus(); }, 20);
+          };
+          addEvent(that, 'blur', that.blurHandler);
+
+          var suggest = function( data ) {
+            var val = that.value;
+            that.cache[val] = data;
+            if (data.length && val.length >= o.minChars) {
+              var s = '';
+              for (var i=0;i<data.length;i++) s += o.renderItem(data[i], val);
+              that.sc.innerHTML = s;
+              that.updateSC(0);
+            }
+            else
+              that.sc.style.display = 'none';
+          }
+
+          that.keydownHandler = function( e ) {
+            var key = window.event ? e.keyCode : e.which;
+            // down (40), up (38)
+            if ((key == 40 || key == 38) && that.sc.innerHTML) {
+              var next, sel = that.sc.querySelector('.autocomplete-suggestion.selected');
+              if (!sel) {
+                next = (key == 40) ? that.sc.querySelector('.autocomplete-suggestion') : that.sc.childNodes[that.sc.childNodes.length - 1]; // first : last
+                next.className += ' selected';
+                that.value = next.getAttribute('data-val');
+              } else {
+                next = (key == 40) ? sel.nextSibling : sel.previousSibling;
+                if (next) {
+                  sel.className = sel.className.replace('selected', '');
+                  next.className += ' selected';
+                  that.value = next.getAttribute('data-val');
+                }
+                else { sel.className = sel.className.replace('selected', ''); that.value = that.last_val; next = 0; }
+              }
+              that.updateSC(0, next);
+              return false;
+            }
+            else if (key == 27) {
+              that.value = that.last_val; that.sc.style.display = 'none';
+            }
+            else if (key == 13 || key == 9) {
+              var sel = that.sc.querySelector('.autocomplete-suggestion.selected');
+              if (sel && that.sc.style.display != 'none') {
+                o.onSelect( e, sel.getAttribute('data-val'), sel);
+                setTimeout( function() { that.sc.style.display = 'none'; }, 20);
+              }
+            }
+          };
+          addEvent(that, 'keydown', that.keydownHandler);
+
+          that.keyupHandler = function( e ) {
+            var key = window.event ? e.keyCode : e.which;
+            if (!key || (key < 35 || key > 40) && key != 13 && key != 27) {
+              var val = that.value;
+              if (val.length >= o.minChars) {
+                if (val != that.last_val) {
+                  that.last_val = val;
+                  clearTimeout(that.timer);
+                  if (o.cache) {
+                    if (val in that.cache) { suggest(that.cache[val]); return; }
+                    // no requests if previous suggestions were empty
+                    for (var i=1; i<val.length-o.minChars; i++) {
+                      var part = val.slice(0, val.length-i);
+                      if (part in that.cache && !that.cache[part].length) { suggest([]); return; }
+                    }
+                  }
+                  that.timer = setTimeout(function() { o.source(val, suggest) }, o.delay);
+                }
+              } else {
+                that.last_val = val;
+                that.sc.style.display = 'none';
+              }
+            }
+          };
+          addEvent(that, 'keyup', that.keyupHandler);
+
+          that.focusHandler = function( e ) {
+            that.last_val = '\n';
+            that.keyupHandler(e)
+          };
+          if (!o.minChars) addEvent(that, 'focus', that.focusHandler);
+        }
+
+        // public destroy method
+        this.destroy = function() {
+          for (var i=0; i<elems.length; i++) {
+            var that = elems[i];
+            removeEvent(window, 'resize', that.updateSC);
+            removeEvent(that, 'blur', that.blurHandler);
+            removeEvent(that, 'focus', that.focusHandler);
+            removeEvent(that, 'keydown', that.keydownHandler);
+            removeEvent(that, 'keyup', that.keyupHandler);
+            if (that.autocompleteAttr)
+              that.setAttribute('autocomplete', that.autocompleteAttr);
+            else
+              that.removeAttribute('autocomplete');
+            shadowRoot.removeChild(that.sc);
+            that = null;
+          }
+        };
+      }
+      return autoComplete;
+    })();
+
+    var item            = itemTemplate.cloneNode(true),
+        header          = item.querySelector('.criteriaSelectorItemHeader'),
+        form            = item.querySelector('.criteriaForm'),
+        headerCondition = item.querySelector('select.itemSelectCondition');
+
+    list.appendChild( item );
+
+
+    ////////////////////////////////////////////////////
+    // клик по заголовку -> скрываем/показываем форму //
+    ////////////////////////////////////////////////////
+
+    header.addEventListener('click', function( e ) {
+      console.log('header clicked', this, e);
+      form.classList.toggle( 'hide' );
+    });
+
+    //////////////////////////
+    // клик по связи группы //
+    //////////////////////////
+    
+    headerCondition.addEventListener('click', function( e ) {
+      console.log('headerCondition', this, e);
+      e.stopPropagation();
+      e.preventDefault();
+      return false;
+    });
+
+
+    var table_name  = form.querySelector('[name="table_name"]'),
+        origin_name = form.querySelector('[name="origin_name"]'),
+        input_name  = form.querySelector('[name="value"]'),
+        keys        = JSON.parse( window.localStorage.getItem('criteriaKeys') );
+
+    // если не загружали ранее значения справочников
+    if ( window.localStorage.getItem('criteriaKeys') === null ) {
+      var request = new XMLHttpRequest();
+      request.open('GET', 'http://localhost/rails/sources.json', true);
+
+      request.onload = function() {
+        if (request.status >= 200 && request.status < 400) {
+          var data = JSON.parse(request.responseText);
+
+          for (var i = 0; i < data.length; i++) {
+            var source = data[i];
+            window.localStorage.setItem(source.type, JSON.stringify(source.data) );
+          };
+
+          var keys = [];
+          data.filter(function(v,i ) {
+            console.log('filter', v,i);
+            keys.push({
+              value: v.type,
+              name: v.name
+            });
+          });
+          
+          window.localStorage.setItem('criteriaKeys', JSON.stringify(keys) );
+
+        } else {
+          console.log( 'fetch error', request );
+        }
+      };
+
+      request.onerror = function( error ) {
+        console.log( 'error', error );
+      };
+
+      request.send();
+    }
+    else {
+      var table_name = form.querySelector('[name="table_name"]');
+          keys       = JSON.parse( window.localStorage.getItem('criteriaKeys') );
       
-      console.log( 'h, s', form.querySelector('[name="table_name"]') );
+      for (var i = 0; i < keys.length; i++) {
+        var option   = document.createElement('option')
+        option.value = keys[i].value;
+        option.text  = keys[i].name;
+        table_name.appendChild( option );
+      };
+    };
 
-      // $( form.querySelector('[name="table_name"]') ).select2();
+    table_name.addEventListener('change', function( e ) {
+      origin_name.innerHTML = '<option selected disabled="true">Выберете поле</option>';
 
-      header.addEventListener('click', function(e){
-        console.log('header clicked', this, e);
-        form.classList.toggle( 'hide' );
-      });
+      var keys = JSON.parse( window.localStorage.getItem( table_name.value ) );
+      console.log( keys );
+      for (var i = 0; i < keys.length; i++) {
+        var option   = document.createElement('option')
+        option.value = keys[i]._id;
+        option.text  = keys[i].russian_name;
 
-      headerCondition.addEventListener('click', function(e){
-        
-        console.log('headerCondition', this, e);
-        
-        e.stopPropagation();
-        e.preventDefault();
-        return false;
+        if ( keys[i].autocomplete_url !== '' ) {
+          option.dataset.autocomplete = keys[i].autocomplete_url;
+          option.dataset.method       = keys[i].autocomplete_title;
+        };
+        origin_name.appendChild( option );
+      };
+    });
 
+    origin_name.addEventListener('change', function( e ) {
+      console.log( origin_name.value, origin_name.options[ origin_name.selectedIndex ] );
+      input_name.value = '';
+    });
+
+    input_name.addEventListener('input', function( e ){
+      /////////////////////////////////////////////////////
+      // если если автокомплитер, то захуячим его в поле //
+      /////////////////////////////////////////////////////
+      // if ( origin_name.options[ origin_name.selectedIndex ].dataset.autocomplete ) {
+      //   if ( this.autocomplete ) {
+      //     this.autocomplete.destroy()
+      //   };
+      // };
+      var xhr,
+          url = 'http://localhost/rails'+origin_name.options[ origin_name.selectedIndex ].dataset.autocomplete;
+      this.autocomplete = autoComplete({
+        selector: input_name,
+        source: function(term, response){
+          try {xhr.abort(); } catch(e){}
+          xhr = $.getJSON( url, { term: input_name.value },
+            function(data){
+              var r = [];
+              for (var i = data.length - 1; i >= 0; i--) {
+                r.push( data[i].term );
+              };
+              response( r );
+          });
+        },
+        onSelect: function(e, term, item){
+          try {xhr.abort(); } catch(e){}
+          xhr = $.getJSON( url, { term: term },
+            function(data){
+              console.log( 'onselect', data );
+              input_name.dataset.value = data[0]._id;
+              input_name.dataset.text  = data[0].term;
+          });
+        }
       });
     });
+
+  });
+  
   };
 
 
-  CoreSelectProto.attributeChangedCallback = function(attr, oldVal, newVal) {
+  CoreSelectProto.attributeChangedCallback = function( attr, oldVal, newVal) {
     console.log('attr, oldVal, newVal: ',attr, oldVal, newVal);
     if (attr === 'select') {
       this.setWho(newVal);
     }
   };
 
-  CoreSelectProto.setWho = function(val) {
+  CoreSelectProto.setWho = function( val) {
     this.select = val;
     this.strong.textContent = this.select;
   };
@@ -350,5 +698,6 @@ window.onload = (function(window, document, undefined) {
   window.CoreSelect = thatDoc.registerElement('core-select', {
     prototype: CoreSelectProto
   });
+
 })(window, document);
 </script>
